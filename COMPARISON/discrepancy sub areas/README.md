@@ -4,7 +4,7 @@
 
 #### Contact:
 
-ibcso@awi.de
+ibcso@awi.de  
 southern-ocean@seabed.org
 
 # Comparison of specific sub areas (figures 7 a-f)

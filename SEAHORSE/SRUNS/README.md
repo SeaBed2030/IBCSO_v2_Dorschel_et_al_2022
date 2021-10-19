@@ -4,7 +4,7 @@
 
 #### Contact:
 
-ibcso@awi.de
+ibcso@awi.de  
 southern-ocean@seabed.org
 
 # summary of our hpc ecosystem and chaining?

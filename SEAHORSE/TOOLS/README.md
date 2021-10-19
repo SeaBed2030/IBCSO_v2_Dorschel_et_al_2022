@@ -4,7 +4,7 @@
 
 #### Contact:
 
-ibcso@awi.de
+ibcso@awi.de  
 southern-ocean@seabed.org
 
 # short intro on what these tools do
