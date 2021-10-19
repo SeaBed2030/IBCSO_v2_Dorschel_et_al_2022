@@ -1,0 +1,45 @@
+#!/usr/bin/bash
+
+module purge 2>/dev/null
+
+SSD_DIR=$(getSSD)  #get new ssd dir from tmp/tmp_$SLURM_JOBID
+LIST_OF_FILES=($(GET_LIST_OF_FILES "${INCOMINGDIR}/*.xyz")) #get list of files matching pattern $INCOMINGDIR/*.xyz
+
+INFILE=${LIST_OF_FILES[${SLURM_ARRAY_TASK_ID}-1]}
+FILESIZE=$(du -ch ${INFILE} | awk '{sum=$1} END {print sum}')
+FILENAME=${INFILE##*/}
+NOSUFFIX=${FILENAME%.*}
+SSDFILE=${SSD_DIR}/${FILENAME}
+TARGET_FILE=${SSD_DIR}/${NOSUFFIX}${SPLITSEPARATOR}
+
+echo "SLURM_JOBID:	$SLURM_JOBID"
+echo "SLURM_ARRAY_TASK_ID:	$SLURM_ARRAY_TASK_ID"
+echo "SLURM_ARRAY_JOB_ID:	$SLURM_ARRAY_JOB_ID"
+echo "CURRENT STAGE:	$SLURM_JOB_NAME"
+echo "EVOKER:	$EVOKER"
+echo "CURRENT FILE:	$INFILE"
+echo "FILESIZE:	$FILESIZE"
+echo "SPLIT SIZE:	$CHUNK_INCOMING_SIZE"
+echo "NEW FILE LOCATION:	${TARGET_FILE}*"
+
+START_TIME=$(date -u +"%Y-%m-%d %T")
+START_UNIX=$(date -u +%s%3N)
+echo "START TIME:	$START_TIME"
+
+cp ${INFILE} ${SSDFILE} #copy incoming file to ssd
+
+tr -d '\r' < ${SSDFILE} > ${SSDFILE}_RAW #remove dos style line breaks
+cut -d$' ' -f -3 ${SSDFILE}_RAW > ${SSDFILE} #take first three columns only
+
+srun split -C ${CHUNK_INCOMING_SIZE} ${SSDFILE} ${TARGET_FILE} --additional-suffix=.insplit #split file into chunks
+
+mv ${TARGET_FILE}*.insplit ${INCOMINGSPLITDATADIR} #move back to isibhv
+
+rm ${SSDFILE}_RAW 2>/dev/null
+rm ${SSDFILE} 2>/dev/null
+rm ${TARGET_FILE}*.insplit 2>/dev/null
+
+END_TIME=$(date -u +"%Y-%m-%d %T")
+echo "END TIME:	$END_TIME"
+END_UNIX=$(date -u +%s%3N) #unix time in ms
+echo "CSVLINE	${SLURM_JOB_NAME}	${SLURM_ARRAY_JOB_ID}	${SLURM_ARRAY_TASK_ID}	${SLURM_ARRAY_TASK_COUNT}	${EVOKER}	${SLURM_JOB_PARTITION}	${FILESIZE_TRUE}	${START_UNIX}	${END_UNIX}"

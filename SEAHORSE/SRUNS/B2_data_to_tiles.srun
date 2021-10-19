@@ -1,0 +1,49 @@
+#!/usr/bin/bash
+
+module purge
+module load ${CONDA} 2>/dev/null
+source activate ${CONDA_ENV}
+
+SSD_DIR=$(getSSD)  #get new ssd dir from tmp/tmp_$SLURM_JOBID
+LIST_OF_FILES=($(GET_LIST_OF_FILES "${WORK_SPLITXYZDIR}/*.xyzsplit"))
+INFILE=${LIST_OF_FILES[$SLURM_ARRAY_TASK_ID-1]} #original file name
+BASEFILE=${INFILE##*/} #filename without path
+PUREFILE=${BASEFILE%.*} #filename without path and without suffix
+SSDFILENAME=${SSD_DIR}/${BASEFILE} #filename on fast SSD
+SSDTILEEXTENT=${SSD_DIR}/${PUREFILE}.tileextent #new name for tileextent on ssd (one process one file i/o)
+FILESIZE=$(du -ch $INFILE | awk '{sum=$1} END {print sum}')
+FILESIZE_TRUE=$(stat -c%s $INFILE | awk '{sum=$1} END {print sum}')
+
+echo "SLURM_JOBID:	$SLURM_JOBID"
+echo "SLURM_ARRAY_TASK_ID:	$SLURM_ARRAY_TASK_ID"
+echo "SLURM_ARRAY_JOB_ID:	$SLURM_ARRAY_JOB_ID"
+echo "CURRENT STAGE:	$SLURM_JOB_NAME"
+echo "EVOKER:	$EVOKER"
+echo "CURRENT FILE:	$INFILE"
+echo "SSD FILE:	$SSDFILENAME"
+echo "FILESIZE:	$FILESIZE"
+
+START_TIME=$(date -u +"%Y-%m-%d %T")
+START_UNIX=$(date -u +%s%3N)
+echo "START TIME:	$START_TIME"
+
+#copy stuff to SSD for faster operations
+rsync -z ${INFILE} ${SSDFILENAME} #copy the original file to mini ssd (/tmp) as it is much faster for I/O
+cp ${WORK_TILEEXTENT_FILE} ${SSDTILEEXTENT} #copy the original tile extent file to ssd (/tmp) as it is much faster for I/O
+
+# level of verbosity:		0 (nothing), 1 (important info: NaN, invalid depths, outside region), 2 (all messages)
+# save discarded lines:		'--output-removed' (writes "*.removed" files featuring removed rows)
+srun python ${WORK_PYDIR}/B2_data_to_tiles.py ${SSDFILENAME} ${SSDTILEEXTENT} --verbose 0 --output-removed
+
+#replace with rsyncs
+mv ${SSD_DIR}/tile_*_${PUREFILE}.til ${WORK_TILEDIR} 2>/dev/null				# move all created tiles back to isilon
+mv ${SSD_DIR}/${PUREFILE}_*.removed ${WORK_REMOVED} 2>/dev/null					# move file with invalid lines in QA directory
+mv ${SSD_DIR}/${PUREFILE}_*.minmax ${WORK_MINMAX} 2>/dev/null					# move min/max statistics to isilon
+mv ${SSD_DIR}/${PUREFILE}*.uniquetiles ${WORK_LISTUNIQUETILES} 2>/dev/null		# move list of unique tiles to isilon
+
+rm ${SSD_DIR}/* 2>/dev/null
+
+END_TIME=$(date -u +"%Y-%m-%d %T")
+echo "END TIME:	$END_TIME"
+END_UNIX=$(date -u +%s%3N) #unix time in ms
+echo "CSVLINE	$SLURM_JOB_NAME	$SLURM_ARRAY_JOB_ID	$SLURM_ARRAY_TASK_ID	$SLURM_ARRAY_TASK_COUNT	$EVOKER	$SLURM_JOB_PARTITION	$FILESIZE_TRUE	$START_UNIX	$END_UNIX"

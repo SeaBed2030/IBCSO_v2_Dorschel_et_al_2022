@@ -1,0 +1,70 @@
+#!/usr/bin/bash
+
+module purge #unload everything
+module load ${GMT} 2>/dev/null #load GMT (defauts to 6)
+SSD_DIR=$(getSSD)  #get new ssd dir from tmp/tmp_$SLURM_JOBID
+
+SIZE=$1 #large files (runs on xfat) or small ones (runs on fat/mini)
+
+if [[ "${SIZE}" == 'large' ]]
+then
+	FILES=($(find ${WORK_TILEDIR}/*.tile -type f -size +${BM_SMALL_SIZE}))
+elif [[ "${SIZE}" == 'small' ]] 
+then
+	FILES=($(find ${WORK_TILEDIR}/*.tile -type f -size +${BM_TINY_SIZE} -not -size +${BM_SMALL_SIZE} ))
+else
+	echo "Missing parameter SIZE."
+	exit 1
+fi
+
+INFILE=${FILES[$SLURM_ARRAY_TASK_ID-1]}
+FILENAME=${INFILE##*/}
+NOSUFFIX=${FILENAME%.*}
+SSDFILE=${SSD_DIR}/${NOSUFFIX}.tile
+BM_SSD=${SSD_DIR}/${NOSUFFIX}.bm
+STAT_SSD=${SSD_DIR}/${NOSUFFIX}.stats
+FILESIZE=$(du -ch ${INFILE} | awk '{sum=$1} END {print sum}')
+FILESIZE_TRUE=$(stat -c%s ${INFILE} | awk '{sum=$1} END {print sum}') #true size in bytes
+
+echo "SLURM_JOBID:	$SLURM_JOBID"
+echo "SLURM_ARRAY_TASK_ID:	$SLURM_ARRAY_TASK_ID"
+echo "SLURM_ARRAY_JOB_ID:	$SLURM_ARRAY_JOB_ID"
+echo "SLURM_PARTITION:	$SLURM_JOB_PARTITION"
+echo "CURRENT STAGE:	$SLURM_JOB_NAME"
+echo "EVOKER:	$EVOKER"
+echo "CURRENT FILE:	$INFILE"
+echo "FILESIZE:	$FILESIZE"
+
+START_TIME=$(date -u +"%Y-%m-%d %T")
+START_UNIX=$(date -u +%s%3N) #unix time in ms
+echo "START TIME:	$START_TIME"
+
+srun rsync -z ${INFILE} ${SSDFILE} #copy tile to ssd
+
+cd ${SSD_DIR} #keep this otherwise weird errors crop up again
+
+srun gmt blockmedian ${SSDFILE} -Q -R${BM_REGION} -I${BM_SIZE} -fc -W -Es -r > ${BM_SSD} # -I{res}: resolution in meters!, -fc: I/O ASCII data as floting point numbers (cartesian coords) 
+srun gmt blockmedian ${SSDFILE} -Q -R${BM_REGION} -I${BM_SIZE} -fc -W -Eb -r > ${STAT_SSD}
+
+srun rsync -z ${STAT_SSD} ${WORK_BLOCKDIR}/${NOSUFFIX}_low.stats  2>/dev/null #move blockmedian stats back to isibhv
+srun rsync -z ${BM_SSD} ${WORK_BLOCKDIR}/${NOSUFFIX}_low.bm 2>/dev/null #move blockmedian back to isibhv
+
+HIGHRES=${SSD_DIR}/${NOSUFFIX}_high.tile
+rm ${HIGHRES} 2>/dev/null
+awk -F" " '{ if(($4 == 15) || ($4 == 20) || ($4 == 25) || ($4 == 30)) { print } }' ${SSDFILE} > ${HIGHRES} #yeah, whatever it works
+if [[ -s ${HIGHRES} ]] #if there is data in the file (looking at you high bm)
+then
+	srun gmt blockmedian ${HIGHRES} -Q -R${BM_REGION} -I${BM_SIZE} -fc -W -Es -r > ${BM_SSD}
+	srun gmt blockmedian ${HIGHRES} -Q -R${BM_REGION} -I${BM_SIZE} -fc -W -Eb -r > ${STAT_SSD}	
+
+	srun rsync -z ${STAT_SSD} ${WORK_BLOCKDIR}/${NOSUFFIX}_high.stats  2>/dev/null
+	srun rsync -z ${BM_SSD} ${WORK_BLOCKDIR}/${NOSUFFIX}_high.bm 2>/dev/null
+fi
+
+rm ${HIGHRES} 2>/dev/null 
+rm ${SSDFILE} 2>/dev/null 
+
+END_TIME=$(date -u +"%Y-%m-%d %T")
+echo "END TIME:	$END_TIME"
+END_UNIX=$(date -u +%s%3N) #unix time in ms
+echo "CSVLINE	$SLURM_JOB_NAME	$SLURM_ARRAY_JOB_ID	$SLURM_ARRAY_TASK_ID	$SLURM_ARRAY_TASK_COUNT	$EVOKER	$SLURM_JOB_PARTITION	$FILESIZE_TRUE	$START_UNIX	$END_UNIX"

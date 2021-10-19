@@ -1,0 +1,50 @@
+#!/usr/bin/bash
+
+SSD_DIR=$(getSSD)  #get new ssd dir from tmp/tmp_$SLURM_JOBID
+
+LIST_OF_FILES=($(GET_LIST_OF_FILES "${XYZDIR}/*.xyz")) #how many files are there in total to process?
+INFILE=${LIST_OF_FILES[$SLURM_ARRAY_TASK_ID-1]}
+FILESIZE=$(du -ch $INFILE | awk '{sum=$1} END {print sum}')
+FILESIZE_TRUE=$(stat -c%s $INFILE | awk '{sum=$1} END {print sum}')
+
+RID=$(getRID $INFILE) #dismantle infile and get rid part
+USE_FILE=$(awk -v RID=$RID -F'\t' '{ if ($1 == RID) print $7 }' ${METADATA_TABLE_WORKING} ) #check metadata rid column ($1) and get restriction column ($7)
+
+if [ -z ${USE_FILE} ] #check if USE_FILE is empty (dataset not in metadata as it was removed for GEBCO)
+then
+	USE_FILE="0"
+else
+	USE_FILE=$(echo "${USE_FILE}" | tr -d '\r') # otherwise make sure that it doesn't contain carriage returns
+fi
+
+if [[ "${USE_FILE}" -ne "1" ]]
+then
+	echo -e "${INFILE##*/} is not available for processing."
+	exit #job done
+fi
+
+echo "SLURM_JOBID:	$SLURM_JOBID"
+echo "SLURM_ARRAY_TASK_ID:	$SLURM_ARRAY_TASK_ID"
+echo "SLURM_ARRAY_JOB_ID:	$SLURM_ARRAY_JOB_ID"
+echo "CURRENT STAGE:	$SLURM_JOB_NAME"
+echo "EVOKER:	$EVOKER"
+echo "CURRENT FILE:	$INFILE"
+echo "FILESIZE:	$FILESIZE"
+
+START_TIME=$(date -u +"%Y-%m-%d %T")
+START_UNIX=$(date -u +%s%3N)
+echo "START TIME:	$START_TIME"
+
+BASEFILE=${INFILE##*/}
+BASEFILE=${BASEFILE%.*}
+SPLITFILE=${WORK_SPLITXYZDIR}/${BASEFILE%.*}${SPLITSEPARATOR}
+SSD_ZIP_FILE=${SSD_DIR}/${BASEFILE}.xz
+SSDFILE=${SSD_DIR}/${BASEFILE}
+
+srun rsync -z ${INFILE} ${SSDFILE}
+srun split -C ${CHUNK_XYZ_SIZE} ${SSDFILE} ${SPLITFILE} --additional-suffix=.xyzsplit
+
+END_TIME=$(date -u +"%Y-%m-%d %T")
+echo "END TIME:	$END_TIME"
+END_UNIX=$(date -u +%s%3N) #unix time in ms
+echo "CSVLINE	$SLURM_JOB_NAME	$SLURM_ARRAY_JOB_ID	$SLURM_ARRAY_TASK_ID	$SLURM_ARRAY_TASK_COUNT	$EVOKER	$SLURM_JOB_PARTITION	$FILESIZE_TRUE	$START_UNIX	$END_UNIX"

@@ -1,0 +1,75 @@
+#!/usr/bin/bash
+
+module purge #unload everything
+module load ${CONDA} 2>/dev/null
+source activate ${CONDA_ENV}
+
+SSD_DIR=$(getSSD)  #get new ssd dir from tmp/tmp_$SLURM_JOBID
+
+{ read -a LISTOFTILES; } < ${WORK_BASIC_TILE_TABLE} #read the list of tiles from text file SCRIPTS/DATA/TILES.txt
+
+id=$(($SLURM_ARRAY_TASK_ID-1)) #slurm runs from 1 to total number of individual tile)
+basicTile=${LISTOFTILES[id]} #get the tile ID (small tiles)
+PATTERN_LO="${WORK_LARGEBLOCKDIR}/tile_${basicTile}_low.bm" 2>/dev/null
+PATTERN_HI="${WORK_LARGEBLOCKDIR}/tile_${basicTile}_high.bm" 2>/dev/null
+PATTERN_LO_COUNT=$(find ${WORK_LARGEBLOCKDIR} -maxdepth 1 -name tile_${basicTile}_low.bm | wc -l) #error safe number of files with that basicTile
+PATTERN_HI_COUNT=$(find ${WORK_LARGEBLOCKDIR} -maxdepth 1 -name tile_${basicTile}_high.bm | wc -l) #error safe number of files with that basicTile
+
+augmentData (){
+	fileType=$1
+	INFILE="${WORK_LARGEBLOCKDIR}/tile_${basicTile}_${fileType}.bm" #find all the subtiles corresponding to basic tile
+	SSDFILE=$SSD_DIR/tile_${basicTile}_${fileType}.bmz #output filename for merged tile on SSD
+	AUGFILE=$SSD_DIR/tile_${basicTile}_${fileType}.bmplus #output filename for merged tile on SSD
+	OUTFILE=$SSD_DIR/tile_${basicTile}_${fileType}.xyv #output filename for merged tile on SSD
+	
+	rm ${SSDFILE} 2>/dev/null
+	rsync -z ${INFILE} ${SSDFILE} #copy files to SSD (save space and time)
+	head ${SSDFILE}
+	head ${WORK_RID_TABLE}
+	srun python ${WORK_PYDIR}/C3_augment_bm.py ${SSDFILE} ${AUGFILE} ${WORK_RID_TABLE}
+	head $AUGFILE
+	cd $SSD_DIR  #is this affected by stdout bug as well?
+	paste -d$'\t' ${SSDFILE} ${AUGFILE} > ${OUTFILE} #combine augmented and bm file
+	rsync -z ${OUTFILE} ${AUGDIR}
+	rm $SSDFILE 2>/dev/null
+	rm $AUGFILE 2>/dev/null
+}
+
+echo "SLURM_JOBID:	$SLURM_JOBID"
+echo "SLURM_ARRAY_TASK_ID:	$SLURM_ARRAY_TASK_ID"
+echo "SLURM_ARRAY_JOB_ID:	$SLURM_ARRAY_JOB_ID"
+echo "SLURM_PARTITION:	$SLURM_JOB_PARTITION"
+echo "EVOKER:	$EVOKER"
+echo "CURRENT BASIC TILE:	$basicTile"
+echo "CURRENT LO RES FILES:	$PATTERN_LO_COUNT"
+echo "CURRENT HI RES FILES:	$PATTERN_HI_COUNT"
+
+START_TIME=$(date -u +"%Y-%m-%d %T")
+START_UNIX=$(date -u +%s%3N)
+echo "START TIME:	$START_TIME"
+
+TOTAL_SIZE=0
+if [ "${PATTERN_LO_COUNT}" -gt 0 ] #try to avoid writing a log if possible -better, but now creates empty file...
+then
+	FILESIZE=$(du -ch $PATTERN_LO | awk '{sum=$1} END {print sum}')
+	FILESIZE_TRUE=$(stat -c%s $PATTERN_LO | awk '{sum=$1} END {print sum}')
+	echo "FILESIZE LO RES:	$FILESIZE"
+	augmentData 'low'
+	TOTAL_SIZE=$((TOTAL_SIZE+FILESIZE_TRUE))
+fi
+
+if [ "${PATTERN_HI_COUNT}" -gt 0 ] #try to avoid writing a log if possible -better, but now creates empty file...
+then
+	FILESIZE=$(du -ch $PATTERN_HI | awk '{sum=$1} END {print sum}')
+	FILESIZE_TRUE=$(stat -c%s $PATTERN_HI | awk '{sum=$1} END {print sum}')
+	echo "FILESIZE HI RES:	$FILESIZE"
+	augmentData 'high'
+	TOTAL_SIZE=$((TOTAL_SIZE+FILESIZE_TRUE))
+fi
+
+END_TIME=$(date -u +"%Y-%m-%d %T")
+echo "END TIME:	$END_TIME"
+END_UNIX=$(date -u +%s%3N) #unix time in ms
+conda deactivate
+module unload ${CONDA} 2>/dev/null
+echo "CSVLINE	$SLURM_JOB_NAME	$SLURM_ARRAY_JOB_ID	$SLURM_ARRAY_TASK_ID	$SLURM_ARRAY_TASK_COUNT	$EVOKER	$SLURM_JOB_PARTITION	${TOTAL_SIZE}	$START_UNIX	$END_UNIX"

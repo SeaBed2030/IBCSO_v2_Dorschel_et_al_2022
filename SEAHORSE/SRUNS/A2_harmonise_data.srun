@@ -1,0 +1,47 @@
+#!/usr/bin/bash
+
+module purge 2>/dev/null #suppress start up message
+module load ${CONDA} 2>/dev/null
+source activate ${CONDA_ENV}
+
+SSD_DIR=$(getSSD)  #get new ssd dir from tmp/tmp_$SLURM_JOBID
+
+LIST_OF_FILES=($(GET_LIST_OF_FILES "${INCOMINGSPLITDATADIR}/*.insplit")) #300 MB chunks
+INFILE=${LIST_OF_FILES[$SLURM_ARRAY_TASK_ID-1]} #original filename
+PUREFILE=${INFILE##*/} #filename without path
+NOSUFFIX=${PUREFILE%%.*} #filename without extension
+SSDFILENAME=${SSD_DIR}/${NOSUFFIX} 
+SSDIN=${SSDFILENAME}.insplit
+XYZFILE=${SSDFILENAME}*.hxyz #this will be created by the python script
+STATSFILE=${SSDFILENAME}*.stats #this will be created by the python script
+ERRORFILE=${SSDFILENAME}*.harmerrors #this will be created by the python script
+FILESIZE=$(du -ch $INFILE | awk '{sum=$1} END {print sum}')
+
+echo "SLURM_JOBID:	$SLURM_JOBID"
+echo "SLURM_ARRAY_TASK_ID:	$SLURM_ARRAY_TASK_ID"
+echo "SLURM_ARRAY_JOB_ID:	$SLURM_ARRAY_JOB_ID"
+echo "CURRENT STAGE:	$SLURM_JOB_NAME"
+echo "EVOKER:	$EVOKER"
+echo "CURRENT FILE:	$PUREFILE"
+echo "ORIGINAL FILENAME:	$DATANAME"
+echo "OUTPUT FILENAME:	${PUREFILE%.*}.hxyz"
+echo "FILESIZE:	$FILESIZE"
+echo "SSDFILE:	$SSDFILENAME"
+
+START_TIME=$(date -u +"%Y-%m-%d %T")
+START_UNIX=$(date -u +%s%3N)
+echo "START TIME:	$START_TIME"
+rm $XYZFILE 2>/dev/null #existing outputfile is deleted by python script, but better safe than sorry!
+rm $STATSFILE 2>/dev/null #existing outputfile is deleted by python script, but better safe than sorry!
+rm $ERRORFILE 2>/dev/null #existing outputfile is deleted by python script, but better safe than sorry!
+cp ${INFILE} ${SSDIN} #copy the original file to mini ssd (/tmp) as it is much faster for I/O
+
+srun python ${PYDIR}/A2_harmonise_data.py ${SSDIN} ${METADATA_TABLE} #run harmonisation
+mv ${XYZFILE} ${INCOMINGSPLITDATADIR} #move file back to ISILON
+mv ${ERRORFILE} ${QA_INC_INVALID} 2>/dev/null #move error file back to ISILON (if it exists)
+rm ${SSDIN} 2>/dev/null
+
+END_TIME=$(date -u +"%Y-%m-%d %T")
+echo "END TIME:	$END_TIME"
+END_UNIX=$(date -u +%s%3N) #unix time in ms
+echo "CSVLINE	$SLURM_JOB_NAME	$SLURM_ARRAY_JOB_ID	$SLURM_ARRAY_TASK_ID	$SLURM_ARRAY_TASK_COUNT	$EVOKER	$SLURM_JOB_PARTITION	$FILESIZE_TRUE	$START_UNIX	$END_UNIX"

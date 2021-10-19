@@ -1,0 +1,19 @@
+#!/usr/bin/bash
+#Xsrun I know what I am doing
+
+source "SEABED2030.config"
+
+JOB_NAME=$1
+JOB_ID=$2
+SCRIPT=$3
+arg=$4
+
+sleep 60 # pause for some time in order to let the SLURM scheduler processed the submitted jobs. Otherwise: get_JOB_ID function overloads the scheduler (by using squeue command)
+
+ERROR_CHECK ${JOB_NAME} ${JOB_ID} "MAIL" # check for errors in specified SEAHORSE step 
+return_code=$?
+echo "ERROR_CHECK:    > $return_code <"
+
+if [ "${return_code}" -eq 0 ]; then
+	source ${SCRIPT} ${arg}
+fi

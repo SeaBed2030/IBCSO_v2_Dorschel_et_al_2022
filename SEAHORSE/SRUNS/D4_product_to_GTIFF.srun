@@ -1,0 +1,46 @@
+#!/usr/bin/bash
+
+module purge #unload everything
+module load ${CONDA} 2>/dev/null
+source activate ${CONDA_ENV}
+which python
+
+SSD_DIR=$(getSSD)  #get new ssd dir from tmp/tmp_$SLURM_JOBID
+
+echo "SLURM_JOBID:	$SLURM_JOBID"
+echo "SLURM_ARRAY_TASK_ID:	$SLURM_ARRAY_TASK_ID"
+echo "SLURM_ARRAY_JOB_ID:	$SLURM_ARRAY_JOB_ID"
+echo "EVOKER:	$EVOKER"
+echo "CURRENT STAGE: $SLURM_JOB_NAME"
+
+LIST_OF_FILES=($(GET_LIST_OF_FILES "${PDIR}/${GRIDPRODUCT}/${timestamp}_*.grd"))
+INFILE=${LIST_OF_FILES[$SLURM_ARRAY_TASK_ID-1]}
+echo "CURRENT FILE:	$INFILE"
+
+IFS='_' read -a SPLITS <<< "${INFILE##*/}" #split file at '_'
+VALUE=${SPLITS[4]} #value is now the 4th element of the split
+echo "CURRENT DATA:	$VALUE"
+
+PUREFILE=${INFILE##*/}
+PUREFILE=${PUREFILE%.*}
+SSDFILE=${SSD_DIR}/${PUREFILE}.grd
+RASTER=${SSD_DIR}/${PUREFILE}.tif
+START_TIME=$(date -u +"%Y-%m-%d %T")
+START_UNIX=$(date -u +%s%3N)
+
+echo "START TIME:	$START_TIME"
+cp ${INFILE} ${SSDFILE}
+
+# convert netCDF to Int16 GeoTIFF
+srun gdal_translate -stats $SSDFILE $RASTEROUTPUT_FORMAT $RASTEROUTPUT_COMPRESSION $RASTEROUTPUT_TILES $RASTEROUTPUT_TYPE_SMALL -a_srs "${IBCSO_WKT}" $RASTER >/dev/null
+
+mv ${RASTER} ${PDIR}/${RASTERPRODUCT}/
+rm ${SSDFILE} 2>/dev/null
+rm ${RASTER} 2>/dev/null
+
+END_TIME=$(date -u +"%Y-%m-%d %T")
+END_UNIX=$(date -u +%s%3N) #unix time in ms
+echo "END TIME:	$END_TIME"
+echo "CSVLINE	$SLURM_JOB_NAME	$SLURM_ARRAY_JOB_ID	$SLURM_ARRAY_TASK_ID	$SLURM_ARRAY_TASK_COUNT	$EVOKER	$SLURM_JOB_PARTITION	$FILESIZE_TRUE	$START_UNIX	$END_UNIX"
+
+

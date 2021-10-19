@@ -1,0 +1,35 @@
+#!/usr/bin/bash
+
+module purge 2>/dev/null #unload everything
+SSD_DIR=$(getSSD)  #get new ssd dir from tmp/tmp_$SLURM_JOBID
+
+FILES=($(find ${INCOMINGSPLITDATADIR}/*.hxyz -maxdepth 1 -exec basename "{}" \; | cut -d'#' -f1| uniq))
+PURENAME=${FILES[$SLURM_ARRAY_TASK_ID-1]}
+PATTERN=${INCOMINGSPLITDATADIR}/${PURENAME}*.hxyz
+
+NEWXYZ=($(find $INCOMINGSPLITDATADIR/*.hxyz -maxdepth 1 -exec basename "{}" \; | cut -d'#' -f3| uniq))
+NEWXYZ=${NEWXYZ[$SLURM_ARRAY_TASK_ID-1]}
+OUTFILE=${INCOMINGDIR}/${NEWXYZ%%.*}.mxyz
+
+FILESIZE=$(du -ch $PATTERN | awk '{sum=$1} END {print sum}')
+
+echo "SLURM_JOBID:	$SLURM_JOBID"
+echo "SLURM_ARRAY_TASK_ID:	$SLURM_ARRAY_TASK_ID"
+echo "SLURM_ARRAY_JOB_ID:	$SLURM_ARRAY_JOB_ID"
+echo "CURRENT STAGE:	$SLURM_JOB_NAME"
+echo "EVOKER:	$EVOKER"
+echo "CURRENT pattern:	$PURENAME*"
+echo "FILESIZE:	$FILESIZE"
+echo "TARGET:	$OUTFILE"
+
+START_TIME=$(date -u +"%Y-%m-%d %T")
+START_UNIX=$(date -u +%s%3N)
+echo "START TIME:	$START_TIME"
+
+srun cat $PATTERN > $OUTFILE
+
+END_TIME=$(date -u +"%Y-%m-%d %T")
+echo "END TIME:	$END_TIME"
+
+END_UNIX=$(date -u +%s%3N) #unix time in ms
+echo "CSVLINE	$SLURM_JOB_NAME	$SLURM_ARRAY_JOB_ID	$SLURM_ARRAY_TASK_ID	$SLURM_ARRAY_TASK_COUNT	$EVOKER	$SLURM_JOB_PARTITION	$FILESIZE_TRUE	$START_UNIX	$END_UNIX"

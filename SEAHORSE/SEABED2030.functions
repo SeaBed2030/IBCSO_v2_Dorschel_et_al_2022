@@ -1,0 +1,303 @@
+#!/usr/bin/bash
+#this is the global function file
+
+### GENERIC FUNCTIONS
+function SYNC_DATA () {
+    module unload ${CONDA} 2>/dev/null
+    module load ${CONDA} 2>/dev/null
+    source activate ${CONDA_ENV}
+	rm ${TILEEXTENT_FILE} ${RID_TABLE} ${METADATA_TABLE} ${TILE_TABLE} ${BASIC_TILE_TABLE} ${STEERING_POINTS_TABLE} ${METADATA_TABLE_WORKING} 2>/dev/null
+    python ${PY_SYNC_SCRIPT} --tiles ${TILEEXTENT_FILE} --rid ${RID_TABLE} --metadata ${METADATA_TABLE} --tileID ${TILE_TABLE} --btileID ${BASIC_TILE_TABLE} --curate metadata --metadata_fixed_cols ${METADATA_TABLE_WORKING} --steering_points ${STEERING_POINTS_TABLE}
+    conda deactivate
+    module unload ${CONDA} 2>/dev/null
+	chmod 770 ${SCRIPTDATADIR}/*
+	cp ${TILEEXTENT_FILE} ${WORK_TILEEXTENT_FILE} 2>/dev/null
+	cp ${BASIC_TILE_TABLE} ${WORK_BASIC_TILE_TABLE} 2>/dev/null
+	cp ${RID_TABLE} ${WORK_RID_TABLE} 2>/dev/null
+
+}
+ export -f SYNC_DATA
+ 
+function DATA_CURATION () {
+    NUMBER_OF_FILES=($(find ${XYZDIR}/*.xyz -empty -type f)) #how many files are empty in XYZ?
+    NUMBER_OF_FILES=${#NUMBER_OF_FILES[@]}
+    if [ ${NUMBER_OF_FILES} -gt "0" ]
+    then
+        MSG_MAIL_WARN "XYZ CURATION" "There are some cruises in\n> ${XYZDIR} \nthat do not contain data.\nPlease consider removing / archiving them ASAP."
+    fi
+    module load ${CONDA} 2>/dev/null
+    source activate ${CONDA_ENV}
+    python ${PYGENERALDIR}/_DATA_CURATION.py ${XYZDIR} ${OLDDATADIR}
+    python ${PYGENERALDIR}/_XYZ_CURATION.py ${XYZDIR}
+    conda deactivate
+    module unload ${CONDA} 2>/dev/null
+ }
+ export -f DATA_CURATION
+
+function TILE_CURATION () {
+	module load ${CONDA} 2>/dev/null
+    source activate ${CONDA_ENV}
+    python ${PYGENERALDIR}/_TILE_CURATION.py ${TILEDIR} --fileStats --cruiseStats
+    conda deactivate
+    module unload ${CONDA} 2>/dev/null
+}
+export -f TILE_CURATION
+
+function INCOMING_CURATION () {
+    module load ${CONDA} 2>/dev/null
+    source activate ${CONDA_ENV}
+    python ${PYGENERALDIR}/_INCOMING_CURATION.py --incomingfolder=${INCOMINGDIR} --oldfolder=${QA_INC_NOT_IN_DB} --tracefolder=${QA_CHANGELOG}
+    python ${PYGENERALDIR}/_XYZ_CURATION.py ${XYZDIR}
+    conda deactivate
+    module unload ${CONDA} 2>/dev/null
+}
+export -f INCOMING_CURATION
+
+function GET_LIST_OF_FILES () {
+    PATTERN=$1
+    shopt -s nullglob #set options to return 0 if empty pattern
+    LIST_OF_FILES=(${PATTERN})
+    echo ${LIST_OF_FILES[@]}
+}
+export -f GET_LIST_OF_FILES
+
+function GET_NUMBER_OF_FILES () {
+    PATTERN=$1
+    shopt -s nullglob #set options to return 0 if empty pattern
+    LIST_OF_FILES=($(GET_LIST_OF_FILES "${PATTERN}"))
+    echo ${#LIST_OF_FILES[@]}
+}
+export -f GET_NUMBER_OF_FILES
+
+function CREATE_FOLDERS () {
+	#collection of folders to be created
+	mkdir ${LOGBASEDIR}
+	mkdir ${ISIBHV_LOGDIR}
+	mkdir ${TILEDIR}
+	mkdir ${QA_TILE_INVALID_DIR}
+	mkdir ${QA_INC_INVALID}
+	mkdir ${QA_INC_COMPLETED}
+	mkdir ${QA_INC_NOT_IN_DB}
+	mkdir ${INCOMINGSPLITDATADIR}
+	mkdir ${OLDDATADIR} #this is were data not on the metadata anymore is stored
+	mkdir ${AUGDIR}	#directory containing augmented blockmedians
+	mkdir ${WORK_TILEDIR}
+	mkdir ${WORK_PYDIR}
+	mkdir ${WORK_REMOVED}
+	mkdir ${WORK_MINMAX}
+	mkdir ${WORK_LISTUNIQUETILES}
+	mkdir ${WORK_SPLITXYZDIR}
+	mkdir ${WORK_EXTENT}
+	mkdir ${WORK_BLOCKDIR}
+	mkdir ${WORK_LARGEBLOCKDIR}
+	cp ${PYDIR}/*.py ${WORK_PYDIR}
+}
+export -f CREATE_FOLDERS
+
+### DYNAMIC VAR CREATION
+function getSSD () { #get new tmp folder that gets cleaned automatically by slurm (use in srun, because we don't know the SLURM_JOB_ID yet)
+   SSD_DIR=${SSD_DIR}/tmp_${SLURM_JOB_ID}
+    echo "${SSD_DIR}"
+}
+export -f getSSD
+
+function getDATETIME () { #get current datetime
+    local datetime=$(date -u +'%Y-%m-%d %H:%M:%S')
+    echo ${datetime}
+}
+export -f getDATETIME
+
+function getTIMESTAMP () { #get curent datetime as short version without pretty formatting
+    local datetime=$(date -u +"%Y-%m-%d_%H%M%S")
+    echo ${datetime}
+}
+export -f getTIMESTAMP
+
+function getRID () { #get rid from standard xyz filename (rid_wweight.xyz)
+    fileName=$1
+    rid=${fileName##*/}
+    IFS='_' read -ra ADDR <<< "$rid"
+    echo ${ADDR[0]}
+}
+export -f getRID
+
+function getWEIGHT () { #get weight from standard xyz filename (rid_wweight.xyz)
+    fileName=$1
+    weight=${fileName##*/}
+    IFS='w' read -ra ADDR <<< "$weight"
+    weight=${ADDR[1]}
+    echo ${weight%%.*}
+}
+export -f getWEIGHT
+
+function getSteeringPoints () { #merge and prepare static data for use in SEAHORSE
+    SYNC_DATA
+	bash ${STEERING_POINT_SCRIPT}
+}
+export -f getSteeringPoints
+
+### MESSAGING FUNCTIONS
+function MSG_WARNING () { #display formatted warning message
+   MSG=$1
+   echo -e "${COL_WARNING}*** $(getDATETIME)\t[WARNING]${WHITE}\t${MSG} ${COL_WARNING}***${NC}"
+}
+export -f MSG_WARNING
+
+function MSG_IMPORTANT () { #display formatted important message
+   MSG=$1
+   echo -e "${COL_IMPORTANT}*** $(getDATETIME)\t[IMPORTANT]${WHITE}\t${MSG} ${COL_IMPORTANT}***${NC}"
+}
+export -f MSG_IMPORTANT
+
+function MSG_INFO () { #display formatted info message
+   MSG=$1
+   echo -e "${COL_INFO}*** $(getDATETIME)\t[INFO]${WHITE}\t${MSG} ${COL_INFO}***${NC}"
+}
+export -f MSG_INFO
+
+function MSG_SUCCESS () { #display formatted success message
+   MSG=$1
+   echo -e "${COL_SUCCESS}*** $(getDATETIME)\t[SUCCESS]${WHITE}\t${MSG} ${COL_SUCCESS}***${NC}"
+}
+export -f MSG_SUCCESS
+
+function MSG_MAIL () { #send mail to project coordinator (Laura)
+   SUBJECT=$1
+   BODY=$2
+   SENDTO=$3
+   CC=$4
+   SIGNATURE="\n\nSincerely yours,\nHenry the horse."
+   echo -e "${BODY}${SIGNATURE}" | mailx -r ${MAIL_EVOKER} -c ${CC} -s "SEAHORSE2030 | ${SUBJECT}" ${SENDTO}
+}
+export -f MSG_MAIL
+
+function MSG_MAIL_CRIT () { #send mail to project coordinator (Laura)
+   SUBJECT="***CRITICAL*** | $1"
+   MSG_MAIL "${SUBJECT}" "${2}" ${MAIL_EVOKER} ${MAIL_PROJECT_DEV}
+}
+export -f MSG_MAIL_CRIT
+
+function MSG_MAIL_WARN () { #send mail to project coordinator (Laura)
+   SUBJECT="***WARNING*** | $1"
+   MSG_MAIL "${SUBJECT}" "${2}" ${MAIL_EVOKER} ${MAIL_PROJECT_DEV}
+}
+export -f MSG_MAIL_WARN
+
+function MSG_MAIL_INFO () { #send mail to project coordinator (Laura)
+	SUBJECT="***INFO*** | $1"
+	MSG_MAIL "${SUBJECT}" "${2}" ${MAIL_PROJECT_COORDINATOR}  ${MAIL_PROJECT_DEV}
+ }
+export -f MSG_MAIL_INFO
+
+function MSG_MAIL_DEV () { #send mail to project developer (Sacha, Fynn)
+   SUBJECT="***DEV*** | $1"
+   MSG_MAIL "${SUBJECT}" "$2" ${MAIL_EVOKER} ${MAIL_PROJECT_DEV}
+}
+export -f MSG_MAIL_DEV
+
+function MSG_MAIL_ALL () { #send mail to project coordinator (Laura) & everyone else
+   SUBJECT="***TEAM*** | $1"
+   MSG_MAIL "${SUBJECT}" "$2" ${MAIL_PROJECT_COORDINATOR} ${MAIL_ALL}
+}
+export -f MSG_MAIL_ALL
+
+function MSG_BATCH () {
+    JOB_NAME=$1
+    echo -e "\n"
+    MSG_IMPORTANT "Job ${JOB_NAME} submitted to sbatch!"
+    echo -e "\n"
+}
+export -f MSG_BATCH
+
+function get_JOB_ID() {
+    SEP=":"
+    JOB_NAME=$1
+    USER=$2
+    #JOB_ID=$(squeue --user=${USER} --noheader --format="%F${SEP}%j" | grep "${JOB_NAME}" | awk -F${SEP} '!($1 in a){a[$1];print $1}' | tr '\n' ${SEP})
+    JOB_ID=$(squeue --user=${USER} --noheader --format="%F${SEP}%j" | grep "${JOB_NAME}" | grep -v "CHAIN" | awk -F${SEP} '!($1 in a){a[$1];print $1}' | tr '\n' ${SEP}) # filter CHAIN_* jobs
+    echo ${JOB_ID%?}
+}
+export -f get_JOB_ID
+
+function ERROR_CHECK() { # ***WARNING***: USE THIS FUNCTION ONLY AS PART OF PROCESSING CHAIN!!
+    if [ $# -eq 0 ]; then
+		MSG_WARNING "No input arguments given! Please specify < JOB_NAME > to indicate directory to check."
+		exit
+	fi
+	
+	JOB_NAME=$1 # get name (e.g. "B1")
+	JOB_ID=$2 # get corresponding slurm job ID (only valid for chained scripts)
+	export ON_COMPUTE_NODE=1
+	# $CHAIN_INPUT_LOGDIR + $CHAIN_OUTPUT_LOGDIR --> need to be set in script that calls CHAIN_SCRIPT function (only if non-default log directories wanted)
+	source ${ERROR_CHECK_SCRIPT} ${JOB_NAME} ${JOB_ID} ${CHAIN_INPUT_LOGDIR} ${CHAIN_OUTPUT_LOGDIR} # run script to check for errors that occurred during given job
+	
+	if [ "${3}" == "MAIL" ]; then # only send mails if explicitly specified
+		# $OUTPUT_SBATCH_ERR + $OUTPUT_JOB_ERR --> exported from ${ERROR_CHECK_SCRIPT} script
+		if [ -s "${OUTPUT_SBATCH_ERR}" -a -s "${OUTPUT_JOB_ERR}" ]; then # found errors in both sbatch logs (from *.slurmerr) and ollie log (from get_my_jobs.sh)
+			ERROR_CNT_sbatch=$(grep -ic "error" ${OUTPUT_SBATCH_ERR})
+			ERROR_CNT_ollie=$(wc -l < ${OUTPUT_JOB_ERR})
+			MSG_MAIL_CRIT "sbatch error(s) and ollie fail(s) for < ${JOB_NAME} >" "Ahoi,\n\nfound < ${ERROR_CNT_sbatch} > sbatch error(s) and < ${ERROR_CNT_ollie} > ollie fail(s) for < ${JOB_NAME} >.\nProcessing chain was stopped and manual actions are required!"
+			return 2
+		elif [ -s "${OUTPUT_SBATCH_ERR}" ]; then # found errors only in sbatch logs (from *.slurmerr)
+			ERROR_CNT=$(grep -ic "error" ${OUTPUT_SBATCH_ERR})
+			MSG_MAIL_CRIT "Found sbatch errors for < ${JOB_NAME} >" "Ahoi,\n\nfound < ${ERROR_CNT} > sbatch error(s) for < ${JOB_NAME} >.\nProcessing chain was stopped and manual actions needed!"
+			return 1
+		elif [ -s "${OUTPUT_JOB_ERR}" ]; then # found errors in ollie log (from get_my_jobs.sh)
+			ERROR_CNT=$(wc -l < ${OUTPUT_JOB_ERR})
+			MSG_MAIL_CRIT "Found ollie fails for < ${JOB_NAME} >" "Ahoi,\nfound < ${ERROR_CNT} > ollie fail(s) for < ${JOB_NAME} >.\nProcessing chain was stopped and manual actions needed!"
+			return 1
+		else
+			return 0
+		fi
+	fi
+}
+export -f ERROR_CHECK
+
+function CHAIN_SCRIPTS() {
+    # check if first cmd paramter equals "1" --> trigger
+    if [[ "$1" == "1" ]]; then
+        MSG_IMPORTANT "Stage is chained!"
+        MSG_IMPORTANT "Stage is chained!"
+        MSG_IMPORTANT "Stage is chained!"
+        SCRIPT="$2"   # get path to subsequently called script
+        JOB_NAME="$3" # name of the job that was just called
+        if [ -z "${4}" ]; then # check if additional argument for following script was given
+            arg=1
+        else
+            arg="${4}"
+        fi
+        NEXT_STEP_NAME=$(echo ${SCRIPT##*/} | cut -d'_' -f1) # identifier of upcoming job (eg. C1)
+        JOB_ID=$(get_JOB_ID ${JOB_NAME} ${EVOKER})
+        CHAIN_NAME="CHAIN_${NEXT_STEP_NAME}"
+		if [ -n "${CHAIN_OUTPUT_LOGDIR}" ]; then # check if custom output log directory was added to environment variables
+			LOGDIR_CHAIN=${CHAIN_OUTPUT_LOGDIR} # TRUE: use as output directory for CHAIN_*.log
+		else
+			LOGDIR_CHAIN=${ISIBHV_LOGDIR}/_CHAIN # FALSE: use default dir seabed2030/SEAHORSE/LOGS/
+		fi
+		mkdir ${LOGDIR_CHAIN}
+        #echo -e "#!/usr/bin/bash\n#Xsrun  I know what I am doing\nsource ${SCRIPTDIR}/SEABED2030.config\nsource ${SCRIPT} ${arg}" | sbatch --job-name="CHAIN_${NEXT_STEP_NAME}" --dependency=afterok:${JOB_ID} --partition=mini,fat,xfat --qos=short --time=00:29:00 --kill-on-invalid-dep=yes --output=/dev/null
+		sbatch --job-name=${CHAIN_NAME} --dependency=afterok:${JOB_ID} --partition=mini,fat,xfat --qos=short --time=00:29:00 --kill-on-invalid-dep=yes --mail-user=${MAIL_EVOKER} --mail-type=FAIL,INVALID_DEPEND --output=${LOGDIR_CHAIN}/${CHAIN_NAME}.log ${CHAIN_SCRIPT} ${JOB_NAME} ${JOB_ID} ${SCRIPT} ${arg}
+	else
+		MSG_IMPORTANT "Please take care of the logfiles created and stored in > ${LOGDIR} <!"
+	fi
+}
+export -f CHAIN_SCRIPTS
+
+function CREATE_STAGE_REPORT() {
+	STAGE_NAME=$1    # name of STAGE (e.g. "B)")
+	LOGFILEDIR=$2    # name of custom log directory to search (default: empty)
+	REPORT_DIR=$2    # name of custom log directory to search (default: empty)
+	if [ -z "${LOGFILEDIR}" ]; then # if *no* custom log directory was parsed use default: LOGBASEDIR
+		LOGFILEDIR=${LOGBASEDIR}
+		REPORT_DIR=${ISIBHV_LOGDIR}/${STAGE_NAME}
+	fi
+	TEMPFILE=${REPORT_DIR}/STAGE_${STAGE_NAME}_report.txt
+	REPORT_FILE=${REPORT_DIR}/STAGE_${STAGE_NAME}_report.csv
+	mkdir ${REPORT_DIR} # create output dir if not yet existing
+	rm ${REPORT_DIR}/*.csv 2>/dev/null # remove old reports
+
+	find ${LOGFILEDIR} -iname "${STAGE_NAME}*.slurmlog" -exec grep -H "CSVLINE" {} \; > ${TEMPFILE} # extract CSVLINE from logfiles
+	cut -d $'\t' -f1 --complement ${TEMPFILE} > ${REPORT_FILE} # remove first column (no info)
+	rm ${TEMPFILE} 2>/dev/null									# delete temporary file
+}
+export -f CREATE_STAGE_REPORT

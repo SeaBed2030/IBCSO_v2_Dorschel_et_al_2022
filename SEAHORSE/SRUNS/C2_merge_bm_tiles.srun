@@ -1,0 +1,121 @@
+#!/usr/bin/bash
+
+module purge #unload everything
+SSD_DIR=$(getSSD)  #get new ssd dir from tmp/tmp_$SLURM_JOBID
+
+{ read -a LISTOFTILES; } < ${WORK_BASIC_TILE_TABLE} #read the list of tiles from text file SCRIPTS/DATA/TILES.txt
+
+id=$(($SLURM_ARRAY_TASK_ID-1)) #slurm runs from 1 to total number of individual tile)
+basicTile=${LISTOFTILES[id]} #get the tile ID (small tiles)
+PATTERN="${WORK_BLOCKDIR}/tile_*_${basicTile}_*" #find all the larger tiles corresponding to basic tile
+
+NUMBER_OF_TILES=$(GET_NUMBER_OF_FILES $PATTERN)
+if [ ${NUMBER_OF_TILES} -eq "0" ]
+then
+	echo "No tiles found for ${PATTERN}"
+	exit
+fi
+
+FILESIZE=$(du -ch $PATTERN | awk '{sum=$1} END {print sum}') 2>/dev/null
+FILESIZE_TRUE=$(stat -c%s $PATTERN | awk '{sum=$1} END {print sum}')
+
+mergeFunction (){
+	suffix=$1
+	fileType=$2
+	PATTERN="${WORK_BLOCKDIR}/tile_*_${basicTile}_${fileType}.${suffix}" #find all the subtiles corresponding to basic tile
+	SSDPATTERN=${SSD_DIR}/tile_*_${basicTile}_${fileType}.${suffix} #new pattern (now on SSD)
+	UNSORTED=$SSD_DIR/tile_${basicTile}_${fileType}_${suffix}.unsorted
+	SSDFILE=$SSD_DIR/tile_${basicTile}_${fileType}.${suffix} #output filename for merged tile on SSD	
+	rm ${SSDPATTERN} 2>/dev/null
+	NUMBER_OF_FILES=$(GET_NUMBER_OF_FILES "${PATTERN}") #how many files are there in total to process?
+
+	#process only if at least one matching input file was found
+	if [ "$NUMBER_OF_FILES" -gt "0" ]; then
+		echo "FOUND ${NUMBER_OF_FILES} ${fileType} ${suffix} FILES!"
+		cp ${PATTERN} ${SSD_DIR} 2>/dev/null #copy files to SSD (save space and time)
+		cd ${SSD_DIR}  #is this affected by stdout bug as well?
+		if [ $suffix == "bm" ]; then
+			for FILE in ${SSDPATTERN}
+			do
+				lines=$(wc -l < ${FILE}) #get total number of blockmedian windows (= lines) in file
+				s=${FILE##*/} #strip file from path...
+				EXTFILE=${s%.*}.extent #...and suffix
+				IFS='_' read -ra ADDR <<< "$EXTFILE" #split filename by '_'
+				tileID=${ADDR[1]} #and take only small tile id
+				awk '{ a[$5]++ } END { for (b in a) { print b } }' ${FILE} > ${SSD_DIR}/${EXTFILE} #unique rids (one rid per line) #count of unique rids: wc -l 
+				awk 'NF' ${SSD_DIR}/${EXTFILE} > .tmp && mv .tmp ${SSD_DIR}/${EXTFILE} #remove empty lines
+				tiles_included=$(tr '\n' ';' < ${SSD_DIR}/${EXTFILE}) #translate newlines to colons
+				tiles_included=${tiles_included%?} #strip trailing colon
+				echo "cruises ${tiles_included} ${tileID} ${basicTile} ${fileType}" >  $SSD_DIR/${EXTFILE} #unique rids 
+				echo "bm_windows ${lines} ${tileID} ${basicTile} ${fileType}" >>  $SSD_DIR/${EXTFILE} #number of bm_windows
+				awk  -v btile=$basicTile -v tile=$tileID -v type=$fileType 'max=="" || $1 > max {max=$1} END{print "xmax",max,tile,btile,type}' $FILE >> $SSD_DIR/${EXTFILE} #xmax
+				awk  -v btile=$basicTile -v tile=$tileID -v type=$fileType 'min=="" || $1 < min {min=$1} END{print "xmin",min,tile,btile,type}' $FILE >> $SSD_DIR/${EXTFILE} #xmin
+				awk  -v btile=$basicTile -v tile=$tileID -v type=$fileType 'max=="" || $2 > max {max=$2} END{print "ymax",max,tile,btile,type}' $FILE >> $SSD_DIR/${EXTFILE} #ymax
+				awk  -v btile=$basicTile -v tile=$tileID -v type=$fileType 'min=="" || $2 < min {min=$2} END{print "ymin",min,tile,btile,type}' $FILE >> $SSD_DIR/${EXTFILE} #ymin
+				awk  -v btile=$basicTile -v tile=$tileID -v type=$fileType 'max=="" || $3 > max {max=$3} END{print "zmax",max,tile,btile,type}' $FILE >> $SSD_DIR/${EXTFILE} #zmax
+				awk  -v btile=$basicTile -v tile=$tileID -v type=$fileType 'min=="" || $3 < min {min=$3} END{print "zmin",min,tile,btile,type}' $FILE >> $SSD_DIR/${EXTFILE} #zmin
+				rsync -z ${SSD_DIR}/${EXTFILE} ${WORK_BLOCKDIR}/${EXTFILE}
+			done
+		fi
+		srun cat ${SSDPATTERN} > ${UNSORTED}
+		rm ${SSDPATTERN} 2>/dev/null
+		srun sort -u ${UNSORTED} > ${SSDFILE} #keep the file on ssd - we'll need it later!
+		rm ${UNSORTED} 2>/dev/null
+	else
+		echo "No files found using pattern:   ${PATTERN}"
+	fi
+}
+
+echo "SLURM_JOBID:	$SLURM_JOBID"
+echo "SLURM_ARRAY_TASK_ID:	$SLURM_ARRAY_TASK_ID"
+echo "SLURM_ARRAY_JOB_ID:	$SLURM_ARRAY_JOB_ID"
+echo "SLURM_PARTITION:	$SLURM_JOB_PARTITION"
+echo "EVOKER:	$EVOKER"
+echo "FILESIZE:	$FILESIZE"
+echo "BASIC TILE:	${basicTile}"
+START_TIME=$(date -u +"%Y-%m-%d %T")
+START_UNIX=$(date -u +%s%3N)
+echo "START TIME:	$START_TIME"
+
+mergeFunction 'bm' 'low'
+mergeFunction 'stats' 'low'
+mergeFunction 'bm' 'high'
+mergeFunction 'stats' 'high'
+
+#the next part combines stats and bm output into one file
+BMFILE="${SSD_DIR}/tile_${basicTile}_low.bm"
+STATFILE="${SSD_DIR}/tile_${basicTile}_low.stats"
+
+if [[ -f ${BMFILE} ]]
+then
+	MERGEFILE=${SSD_DIR}/tile_${basicTile}_low.full
+	OUTFILE=${SSD_DIR}/tile_${basicTile}_low.bm
+	paste -d $'\t' ${BMFILE} ${STATFILE} > ${MERGEFILE}
+	cut -d $'\t' -f1,2,5,8-13 ${MERGEFILE} > ${OUTFILE}
+	rsync -z ${OUTFILE} ${WORK_LARGEBLOCKDIR}/
+	rm $BMFILE 2>/dev/null
+	rm $STATFILE 2>/dev/null
+	rm $MERGEFILE 2>/dev/null
+fi
+
+BMFILE="$SSD_DIR/tile_${basicTile}_high.bm"
+STATFILE="$SSD_DIR/tile_${basicTile}_high.stats"
+
+if [[ -f ${BMFILE} ]]
+then
+echo "found ${BMFILE}"
+	MERGEFILE=${SSD_DIR}/tile_${basicTile}_high.full
+	OUTFILE=${SSD_DIR}/tile_${basicTile}_high.bm
+	paste -d $'\t' $BMFILE $STATFILE > $MERGEFILE
+	cut -d $'\t' -f1,2,5,8-13 $MERGEFILE > $OUTFILE
+	rsync -z ${OUTFILE} ${WORK_LARGEBLOCKDIR}
+	rm $BMFILE 2>/dev/null
+	rm $STATFILE 2>/dev/null
+	rm $MERGEFILE 2>/dev/null
+fi
+
+END_TIME=$(date -u +"%Y-%m-%d %T")
+echo "END TIME:	$END_TIME"
+END_UNIX=$(date -u +%s%3N) #unix time in ms
+
+echo "CSVLINE	$SLURM_JOB_NAME	$SLURM_ARRAY_JOB_ID	$SLURM_ARRAY_TASK_ID	$SLURM_ARRAY_TASK_COUNT	$EVOKER	$SLURM_JOB_PARTITION	$FILESIZE_TRUE	$START_UNIX	$END_UNIX"

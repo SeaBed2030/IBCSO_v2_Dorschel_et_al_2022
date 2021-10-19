@@ -1,0 +1,39 @@
+#!/usr/bin/bash
+
+module purge
+module load ${GMT} 2>/dev/null
+
+echo "SLURM_JOBID:	$SLURM_JOBID"
+echo "SLURM_ARRAY_TASK_ID:	$SLURM_ARRAY_TASK_ID"
+echo "SLURM_ARRAY_JOB_ID:	$SLURM_ARRAY_JOB_ID"
+echo "EVOKER:	$EVOKER"
+echo "CURRENT STAGE:	$SLURM_JOB_NAME"
+
+PDIR=$(ls -d $PRODUCTDIR/* | tail -1) #get latest product
+XYVDIR=${PDIR}/${XYVPRODUCT}
+type=$1
+
+if [[ $type == 'NN' ]]
+then
+	SOURCE=($(ls $XYVDIR/*Neighbour_script.sh)) 
+elif [[ $type == 'GRID' ]]
+then
+	SOURCE=($(ls $XYVDIR/*grid_script.sh)) 
+elif [[ $type == 'SURF' ]]
+then
+	SOURCE=($(ls $XYVDIR/*Surface_script.sh)) 
+fi
+
+SCRIPT=${SOURCE[$SLURM_ARRAY_TASK_ID-1]} #original filename
+
+echo "CURRENT SCRIPT:	$SCRIPT"
+START_TIME=$(date -u +"%Y-%m-%d %T")
+START_UNIX=$(date -u +%s%3N)
+echo "START TIME:	$START_TIME"
+
+source ${SCRIPT} #this contains the sruns!
+
+END_TIME=$(date -u +"%Y-%m-%d %T")
+echo "END TIME:	$END_TIME"
+END_UNIX=$(date -u +%s%3N) #unix time in ms
+echo "CSVLINE	$SLURM_JOB_NAME	$SLURM_ARRAY_JOB_ID	$SLURM_ARRAY_TASK_ID	$SLURM_ARRAY_TASK_COUNT	$EVOKER	$SLURM_JOB_PARTITION	$FILESIZE_TRUE	$START_UNIX	$END_UNIX"

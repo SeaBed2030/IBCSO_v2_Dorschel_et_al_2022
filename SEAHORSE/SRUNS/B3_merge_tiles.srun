@@ -1,0 +1,48 @@
+#!/bin/sh
+SSD_DIR=$(getSSD)  #get new ssd dir from tmp/tmp_$SLURM_JOBID
+
+{ read -a LIST_OF_TILES; } < ${WORK_TILE_TABLE} #read the list of tiles from text file SCRIPTS/DATA/TILES.txt
+
+id=$((${SLURM_ARRAY_TASK_ID}-1)) #slurm runs from 1 to total number of individual tile)
+TILE_ID=${LIST_OF_TILES[id]} #get the tile ID (small tiles)
+PATTERN="${WORK_TILEDIR}/tile_${TILE_ID}_*.til" #find all tile splits
+BASIC_ID=($(echo ${PATTERN} | tr "_" "\n")) #replace filename '_' with \n (fancy way to create a list)
+BASIC_ID=${BASIC_ID[2]} #the second element in list is 0:tile 1:id and 2:basic Tile; this is the large tile ID
+OUTFILE=tile_${TILE_ID}_${BASIC_ID}.tile #local output filename for merged tile
+ZIPFILE=${WORK_TILEDIR}/tile_${TILE_ID}_${BASIC_ID}.zip #local output filename for zipped tiles
+SSDFILE=${SSD_DIR}/${OUTFILE} #output filename for merged tile on SSD
+SSDPATTERN="${SSD_DIR}/tile_${TILE_ID}_${BASIC_ID}_*.til" #new pattern (now on SSD)
+
+echo "SLURM_JOBID:	$SLURM_JOBID"
+echo "SLURM_ARRAY_TASK_ID:	$SLURM_ARRAY_TASK_ID"
+echo "SLURM_ARRAY_JOB_ID:	$SLURM_ARRAY_JOB_ID"
+echo "SLURM_PARTITION:	$SLURM_JOB_PARTITION"
+echo "SLURM_TOTAL_TASKS:	$SLURM_ARRAY_TASK_COUNT"
+echo "CURRENT STAGE: $SLURM_JOB_NAME"
+echo "EVOKER: ${EVOKER}"
+echo "CURRENT TILE:	${TILE_ID}"
+echo "CURRENT BASIC:	${BASIC_ID}"
+echo "CURRENT FILE:	${PATTERN}"
+echo "CURRENT OUTPUT:	${OUTFILE}"
+
+START_TIME=$(date -u +"%Y-%m-%d %T")
+START_UNIX=$(date -u +%s%3N)
+echo "START TIME:	$START_TIME"
+
+cd ${WORK_TILEDIR}
+cp ${PATTERN} ${SSD_DIR}
+
+cd ${SSD_DIR}
+FILESIZE=$(du -ch ${SSDPATTERN} | awk '{sum=$1} END {print sum}')
+FILESIZE_TRUE=$(stat -c%s ${SSDPATTERN} | awk '{sum=$1} END {print sum}')
+echo "FILESIZE:	$FILESIZE"
+
+# merge *.til files into tile files
+srun cat ${SSD_DIR}/*.til > ${SSDFILE}
+
+mv 	${SSDFILE} ${WORK_TILEDIR}
+
+END_TIME=$(date -u +"%Y-%m-%d %T")
+echo "END TIME:	$END_TIME"
+END_UNIX=$(date -u +%s%3N) #unix time in ms
+echo "CSVLINE	$SLURM_JOB_NAME	$SLURM_ARRAY_JOB_ID	$SLURM_ARRAY_TASK_ID	$SLURM_ARRAY_TASK_COUNT	$EVOKER	$SLURM_JOB_PARTITION	$FILESIZE_TRUE	$START_UNIX	$END_UNIX"

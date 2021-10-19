@@ -1,0 +1,24 @@
+#!/usr/bin/bash
+module purge
+module load python3/3.7.10_intel2021 centoslibs
+
+script=$1
+START_TIME=$(date -u +"%Y-%m-%d %T")
+echo "START TIME:	$START_TIME"
+
+window_a=100
+window_b=5
+
+if [[ $script -eq "1" ]]
+then
+	echo "running IBCSO1 ma"
+	srun python /./_PY/02_IBCSO_ma.py ./DATA/COMP_IBCSO1_data.csv $window_a $window_b
+else
+	echo "running SRTM ma"
+	srun python /./_PY/IBCSO2_comp/02_IBCSO_ma.py ./DATA/COMP_SRTM_data.csv $window_a $window_b
+fi
+
+END_TIME=$(date -u +"%Y-%m-%d %T")
+echo "END TIME:	$END_TIME"
+
+module purge

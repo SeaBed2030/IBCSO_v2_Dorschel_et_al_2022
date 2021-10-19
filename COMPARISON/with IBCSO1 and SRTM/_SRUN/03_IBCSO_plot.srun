@@ -1,0 +1,21 @@
+#!/usr/bin/bash
+module purge
+module load R/3.6.1 centoslibs gdal/2.4.4 proj #intel.compiler proj/4.9.3 2>/dev/null
+
+script=$1
+START_TIME=$(date -u +"%Y-%m-%d %T")
+echo "START TIME:	$START_TIME"
+
+if [[ $script -eq "1" ]]
+then
+	echo "running IBCSO1 plot"
+	srun Rscript /./_R/03_IBCSO_plot_IBCSO1.R --max-mem-size 64G
+else
+	echo "running SRTM plot"
+	srun Rscript /./_R/03_IBCSO_plot_SRTM.R --max-mem-size 64G
+fi
+
+END_TIME=$(date -u +"%Y-%m-%d %T")
+echo "END TIME:	$END_TIME"
+
+module purge
