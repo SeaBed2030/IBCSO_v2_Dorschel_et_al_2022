@@ -1,5 +1,5 @@
 # The International Bathymetric Chart of the Southern Ocean (IBCSO) Version 2
-*Dorschel et al. 2022*
+*Dorschel et al. (2022)*
 
 #### Contact:
 ibcso@awi.de  
@@ -13,7 +13,7 @@ This repository also contains the comparison between **IBCSO v2** and **IBCSO v1
 This repository contains the following folders:
 
    - SEAHORSE
-     - all shell, srun and python scripts used in the main work flow (**SEAHORSE**) to create a gridded map from xyz files
+     - all `shell`, `srun` and `python` scripts used in the main work flow (**SEAHORSE**) to create a gridded map from xyz files
    - COMPARISON
      - contains the scripts for both comparisons in the paper:
      - discrepancy map of sub areas
