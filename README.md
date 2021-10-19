@@ -2,7 +2,7 @@
 *Dorschel et al. 2022*
 
 #### Contact:
-ibcso@awi.de
+ibcso@awi.de  
 southern-ocean@seabed.org
 
 ## Script repository
