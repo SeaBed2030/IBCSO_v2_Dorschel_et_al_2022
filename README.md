@@ -20,7 +20,6 @@ This repository contains the following folders:
      - comparison between **IBCSO v2** and **IBCSO v1** / **SRTM15+ v2.2**
 
 # Software References:
-<span style="color:red"> Test</span>
 ### GDAL 3.1.4
 GDAL/OGR contributors. (2020). *GDAL/OGR Geospatial Data Abstraction software Library*. Retrieved from https://gdal.org
 
