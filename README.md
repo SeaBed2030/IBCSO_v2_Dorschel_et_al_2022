@@ -18,3 +18,5 @@ This repository contains the following folders:
      - contains the scripts for both comparisons in the paper:
      - discrepancy map of sub areas
      - comparison between **IBCSO v2** and **IBCSO v1** / **SRTM15+ v2.2**
+
+## References:
