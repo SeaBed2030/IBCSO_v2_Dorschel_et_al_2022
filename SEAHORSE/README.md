@@ -12,11 +12,6 @@ southern-ocean@seabed.org
 
 Twitter: @ibcso
 
-## Summary of SEAHORSE STUFF
-
-- add description of what's happening
-- description on our hpc environment
-
 ## `conda` environment
 
 We heavily rely on both `python` and `GDAL` routines for several steps of the **SEAHORSE** workflow. In order to provide a consistent and maintainable programming environment, we use a custom `conda` environment ([seabed2030](./seabed2030.yml)).
