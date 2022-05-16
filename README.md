@@ -1,9 +1,14 @@
 # The International Bathymetric Chart of the Southern Ocean (IBCSO) Version 2
 *Dorschel et al. (2022)*
+https://doi.org/10.1038/s41597-022-01366-7
+
+### Homepage:
+www.ibcso.org
 
 #### Contact:
 ibcso@awi.de  
 southern-ocean@seabed.org
+Twitter: @ibcso
 
 ## Script repository
 This repository contains all scripts that were used in the creation of the manuscript and the analysis contained therein. This repository contains all scripts   used in the main work flow (**SEAHORSE**) in an abstracted form. This means that you will not be able to use it as is - **SEAHORSE** is heavily adapted to work seamlessly in our **HPC** ecosystem. You might use it as a template to create your own derivative of the work flow. 
